@@ -194,8 +194,8 @@ void convertToTree(std::string inputFileName, std::string stagePositionFileName,
 			output.triggerToA=trigger.toa;
 
 			//find all hits within a range of the trigger
-			const double maxTimeBeforeTrigger=500*4096/25; //500 ns
-			const double maxTimeAfterTrigger=500*4096/25; //500 ns
+			const double maxTimeBeforeTrigger=300*4096/25; //300 ns
+			const double maxTimeAfterTrigger=700*4096/25; //700 ns
 			for(unsigned i=0; i<chips.size(); i++) {
 				auto& c = chips[i];
 				c->discardEntriesBeforeT(trigger.toa-maxTimeBeforeTrigger);

@@ -59,6 +59,19 @@ namespace { //todo:move to cpp file
 		return intersects;
 	}
 
+	bool isInArea(TVector3 pos, std::vector<TVector3> corners) {
+		//if pos has 1 crossing with line segment to infinite it is inside, if 0 or 2 then not inside
+		for(auto& c:corners) c.SetZ(0);
+		TVector3 inf{13249,13499,0};//should be actually infinity. Note prime: because otherwise a line through a corner is an option.
+		pos.SetZ(0);
+		int nCrossings=0;
+		nCrossings+=doesIntersect(corners.front(), corners.back(), pos,inf);
+		for(unsigned i=0; i<corners.size()-1; i++) {
+			nCrossings+=doesIntersect(corners[i], corners[i+1], pos,inf);
+		}
+		return nCrossings==1;
+	}
+
 }
 
 struct AlignmentHolder {
@@ -103,8 +116,12 @@ struct AlignValueHolder : AlignmentHolder {
 struct ShiftAndRotateAlignment : AlignmentHolder {
 	using AlignmentHolder::AlignmentHolder;
 	TVector3 shift{};
-	TVector3 COM{};
+	TVector3 COM{}; //relative COM (before shift)
 	TVector3 rotation{};
+
+	TVector3 getShiftedCOM() const {
+		return COM+shift;
+	}
 
 	virtual Vec3 rotateAndShift(const Vec3& hpos) const {
 		TVector3 Thpos=hpos; //convert to TVector3 and then call the same function
@@ -112,11 +129,8 @@ struct ShiftAndRotateAlignment : AlignmentHolder {
 		return Thpos;
 	}
 	virtual TVector3& rotateAndShift(TVector3& hpos) const {
+		hpos=rotate(hpos);
 		hpos+=shift;
-		for(int i=0; i<3; i++) {
-			const std::array<TVector3, 3> unitVectors={ TVector3{1,0,0}, TVector3{0,1,0}, TVector3{0,0,1} };
-			hpos=RotateAroundPoint(hpos, rotation[i],COM, unitVectors[i]);
-		}
 		return hpos;
 	}
 	virtual Vec3 rotateAndShiftBack(const Vec3& hpos) const {
@@ -125,19 +139,49 @@ struct ShiftAndRotateAlignment : AlignmentHolder {
 		return Thpos;
 	}
 	virtual TVector3& rotateAndShiftBack(TVector3& hpos) const {
-		for(int i=2; i>=0; i--) {
-			const std::array<TVector3, 3> unitVectors={ TVector3{1,0,0}, TVector3{0,1,0}, TVector3{0,0,1} };
-			hpos=RotateAroundPoint(hpos, -rotation[i],COM, unitVectors[i]);
-		}
 		hpos-=shift;
+		rotateBack(hpos);
 		return hpos;
 	}
 
-	void updateShift(TFile&, std::string dirName);
-	void updateShift(TFile& file, const std::string& dirName, int axis);
-	void updateRotation(TFile&, std::string dirName);
+	Vec3 rotate(const Vec3& hpos) const {
+		TVector3 Thpos=hpos; //convert to TVector3 and then call the same function
+		return rotate(Thpos);
+	}
+	TVector3& rotate(TVector3& hpos) const {
+		for (int i = 0; i < 3; i++) {
+			const std::array<TVector3, 3> unitVectors = { TVector3 { 1, 0, 0 },
+					TVector3 { 0, 1, 0 }, TVector3 { 0, 0, 1 } };
+			hpos = RotateAroundPoint(hpos, rotation[i], COM, unitVectors[i]);
+		}
+		return hpos;
+	}
 
-private:
+	virtual Vec3 rotateBack(const Vec3& hpos) const {
+		return rotateBack(hpos, COM);
+	}
+	virtual Vec3 rotateBack(const Vec3& hpos, const Vec3& Center) const {
+		TVector3 Thpos=hpos; //convert to TVector3 and then call the same function
+		rotateBack(Thpos, TVector3(Center) );
+		return Thpos;
+	}
+	virtual TVector3& rotateBack(TVector3& hpos) const {
+		return rotateBack(hpos, COM);
+	}
+	virtual TVector3& rotateBack(TVector3& hpos, const TVector3& Center) const {
+		for(int i=2; i>=0; i--) {
+			const std::array<TVector3, 3> unitVectors={ TVector3{1,0,0}, TVector3{0,1,0}, TVector3{0,0,1} };
+			hpos=RotateAroundPoint(hpos, -rotation[i],Center, unitVectors[i]);
+		}
+		return hpos;
+	}
+
+	virtual void updateShift(TFile&, const std::string& dirName);
+	void updateShift(TFile& file, const std::string& histName, int i);
+	virtual void updateRotation(TFile&, std::string dirName);
+
+
+protected:
 	void readParameters(std::istream& in) {
 		in>>shift>>COM>>rotation;
 	}
@@ -172,6 +216,8 @@ struct ChipAlignment : ShiftAndRotateAlignment {
 		hpos[0]*=-dir; hpos[1]*=dir;
 		return hpos;
 	}
+
+	virtual void updateShift(TFile&, const std::string& dirName);
 
 	std::array<TVector3,4> getChipCorners() const { //fixme
 		std::array<TVector3,4> corners={//upper-left, upper-right, bottom-left, bottom-right
@@ -210,44 +256,54 @@ struct ChipAlignment : ShiftAndRotateAlignment {
 
 };
 
-void ShiftAndRotateAlignment::updateShift(TFile& file,const std::string& dirName, int i) {
-		const std::string histNames[] = { "xResidual", "yResidual", "zResidual" };
-		auto hist = getObjectFromFile<TH1>(dirName + "/" + histNames[i], &file);
+void ShiftAndRotateAlignment::updateShift(TFile& file,const std::string& histName, int i) {
+		auto hist = getObjectFromFile<TH1>(histName, &file);
 		const int minEntries = 100;
 		if (hist->GetEntries() < minEntries) {
-			std::cout << "skipped " << dirName << " because less than " << minEntries
+			std::cout << "skipped " << histName << " because less than " << minEntries
 					<< " in histogram\n";
 		} else {
-			double mean = hist->GetMean(); //getMeanFromGausCoreFit(*hist);
+			const double learningRate=1;
+			double mean = hist->GetMean(); // learningRate*hist->GetMean(); //getMeanFromGausCoreFit(*hist);
 			shift[i] -= mean;
-			std::cout << "update " << histNames[i] << " by " << mean << "\n";
+			std::cout << "update " << histName << " by " << mean << "\n";
 		}
 }
 
-void ShiftAndRotateAlignment::updateShift(TFile& file, std::string dirName) {
+void ShiftAndRotateAlignment::updateShift(TFile& file, const std::string& dirName) {
 	std::cout<<dirName<<"\n";
 	for (int i = 0; i < 3; i++) {
-		updateShift(file, dirName, i);
+		const std::string histNames[] = { "xResidual", "yResidual", "zResidual" };
+		updateShift(file, dirName+"/"+histNames[i], i);
+	}
+}
+void ChipAlignment::updateShift(TFile& file, const std::string& dirName) {
+	std::cout<<dirName<<"\n";
+	for (int i = 0; i < 3; i++) {
+		const std::string histNames[] = { "xResidual", "yResidual", "zResidual" };
+		ShiftAndRotateAlignment::updateShift(file, dirName+"/local/"+histNames[i], i);
 	}
 }
 
 void ShiftAndRotateAlignment::updateRotation(TFile& file, std::string dirName) {
-	//Find Center of Mass (point of rotation)
-	auto hitmap=getObjectFromFile<TH2>(dirName+"/positionHitMap", &file);
-	auto zHit=getObjectFromFile<TH1>(dirName+"/zHit", &file);
-	const int minEntries=10000;
-	if(hitmap->GetEntries()<minEntries) {std::cout<<"skipped "<<dirName<<" because less than "<<minEntries<<" in histogram\n"; return;}
-	double meanX=hitmap->GetMean(1), meanY=hitmap->GetMean(2), meanZ=zHit->GetMean();
-	auto oldCOM=COM;
-	COM.SetXYZ(meanX,meanY,meanZ);
-	std::cout<<"updated COM by "<<COM-oldCOM<<"\n";
+//	Find Center of Mass (point of rotation)
+//	auto hitmap=getObjectFromFile<TH2>(dirName+"/global/positionHitMap", &file);
+//	auto zHit=getObjectFromFile<TH1>(dirName+"/global/zHit", &file);
+//	const int minEntries=10000;
+//	if(hitmap->GetEntries()<minEntries) {std::cout<<"skipped "<<dirName<<" because less than "<<minEntries<<" in histogram\n"; return;}
+//	double meanX=hitmap->GetMean(1), meanY=hitmap->GetMean(2), meanZ=zHit->GetMean();
+//	auto oldCOM=COM;
+//	COM.SetXYZ(meanX,meanY,meanZ);
+//	std::cout<<"updated COM by "<<COM-oldCOM<<"\n";
 
 	//Find rotation
-	for(int i=0; i<3; i++) {
+	for(int i=2; i<3; i++)
+	{
 		const std::array<std::string,3> x={"x", "y", "z"};
 		auto xHist=getObjectFromFile<TH1>(dirName+"/"+x[i]+"Rotation", &file);
-		std::cout<<"update "<<x[i]<<" rotation by "<<xHist->GetMean()<<"\n";
-		rotation[i]+=xHist->GetMean();
+		auto mean=xHist->GetMean(); //getMeanFromGausCoreFit(*xHist);
+		std::cout<<"update "<<x[i]<<" rotation by "<<mean<<"\n";
+		rotation[i]+=mean;
 	}
 
 }

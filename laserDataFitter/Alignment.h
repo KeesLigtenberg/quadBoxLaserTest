@@ -10,6 +10,7 @@
 
 #include "TGraph.h"
 #include "TH1.h"
+#include "TPolyLine.h"
 #include "TFitResult.h"
 
 
@@ -59,33 +60,53 @@ struct Alignment {
 		for(auto& c : corners) c=quad.rotateAndShift(c);
 		return corners;
 	}
+	std::vector<TVector3> getAllChipCorners() const { //in global frame
+		std::vector<TVector3> all;
+		for(int i=0; i<4; i++) {
+			auto corners=getChipCorners(i);
+			all.insert(all.end(), corners.begin(), corners.end());
+		}
+		return all;
+	}
+	void drawChipEdges(bool globalFrame=true, Color_t color=kBlack) const { //in global frame
+		for(int i=0; i<4; i++) {
+			auto corners=globalFrame ? getChipCorners(i) : chips[i].getChipCorners();
+			TPolyLine l;
+			for(auto& corner : corners) {
+				l.SetNextPoint(corner.x(), corner.y());
+			}
+			l.SetNextPoint(corners[0].x(), corners[0].y());
+			l.SetLineColor(color);
+			l.DrawClone();
+		}
+	}
 };
 
 void Alignment::updateShifts(TFile& file) {
-	quad.updateShift(file, "quad");
-//	for (int i = 0; i < 4; i++) {
-//		chips[i].updateShift(file, "chip" + std::to_string(i + 1));
-//	}
+	for (int i = 0; i < 4; i++) {
+		chips[i].updateShift(file, "chip" + std::to_string(i + 1));
+	}
 }
 void Alignment::updateRotations(TFile& file) {
-	quad.updateRotation(file, "quad");
-//	for (int i = 0; i < 4; i++) {
-//		chips[i].updateRotation(file, "chip" + std::to_string(i + 1));
-//	}
+	for (int i = 0; i < 4; i++) {
+		chips[i].updateRotation(file, "chip" + std::to_string(i + 1));
+	}
 }
 
 void Alignment::updateDriftSpeed(TFile& file) {
 	//calculate driftspeed
 	TTree* tree = getObjectFromFile<TTree>("fitResults", &file);
-	TH1* hist = getHistFromTree(tree, "hitAverage.z:laser.z",
-			"fabs(hitAverage.x)+fabs(hitAverage.y)>0", "driftprof(26,-0.5,25.5)", "prof goff");
-	if (hist->GetStdDev() > 5) {
-		auto fitResult = hist->Fit("pol1", "QS");
+//	TH1* hist = getHistFromTree(tree, "hitAverage.z:laser.z",
+//			"fabs(hitAverage.x)+fabs(hitAverage.y)>0 && laser.z<35", "driftprof(36,-0.5,35.5)", "prof goff");
+	auto graph=getGraphFromTree(*tree,"hitAverage.z:laser.z",
+			"fabs(hitAverage.x)+fabs(hitAverage.y)>0", "goff");
+	if (graph->GetRMS() > 5) {
+		auto fitResult = graph->Fit("pol1", "QS");
 		std::cout << "update drift speed by a factor " << fitResult->Parameter(1)
 				<< "\n";
 		driftSpeed.value /= fitResult->Parameter(1);
 	} else {
-		std::cout << "skipped updating drift speed\n";
+		std::cout << "skipped updating drift speed because RMS < 5\n";
 	}
 }
 
