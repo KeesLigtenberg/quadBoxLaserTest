@@ -40,8 +40,8 @@ struct QuadTreeReader {
 	}
 
 	Long64_t entryNumber{0};
-	bool getNextEntry() {
-		entryNumber++;
+	bool getNextEntry(int increaseEntryBy=1) {
+		entryNumber+=increaseEntryBy; //change this for quick alignment
 		static Long64_t nEntries=tree->GetEntries();
 		if(!(entryNumber%1000)) std::cout<<entryNumber<<"/"<<nEntries<<"\n";
 		if(entryNumber < nEntries) {

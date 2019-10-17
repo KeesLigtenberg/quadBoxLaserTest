@@ -356,18 +356,28 @@ void QuadTrackFitter::Loop(std::string outputFile,const Alignment& alignment) {
 
 			if(h.flag!=PositionHit::Flag::valid) continue;
 			hists[h.chip].fillHit(h);
-			hists[h.chip].fillRotation(h, alignment.chips[h.chip].COM);
+
 			quad.fillHit(h);
-			quad.fillRotation(h, alignment.quad.COM);
+			quad.fillRotation(h, alignment.quad.getShiftedCOM());
 			auto localPosition=alignment.quad.rotateAndShiftBack(h.position);
 			auto localResidual=alignment.quad.rotateBack(h.residual, {0,0,0} );
 			auto expectedPosition = h.position-h.residual;
-			auto localExpectedPosition=alignment.quad.rotateAndShiftBack(expectedPosition);
+			auto localExpectedPosition=expectedPosition;
+			localExpectedPosition=alignment.quad.rotateAndShiftBack(localExpectedPosition);
+
+			auto chipFrameResidual=alignment.chips[h.chip].rotateBack(localResidual, {0,0,0});
+			if(h.chip==0 || h.chip==3) {
+				chipFrameResidual.x*=-1; chipFrameResidual.y*=-1;
+			}
+			auto chipFrameExpectedPosition=localExpectedPosition;
+			chipFrameExpectedPosition=alignment.chips[h.chip].rotateAndShiftBack(chipFrameExpectedPosition);
+			hists[h.chip].fillRotation(chipFrameExpectedPosition, chipFrameResidual, alignment.chips[h.chip].COM);
 
 			hists[h.chip].local.fill( localPosition, localResidual, h.ToT );
 			quad.local.fill( localPosition, localResidual, h.ToT );
 
-			hists[h.chip].locExp.fill( localExpectedPosition, localResidual, h.ToT );
+//			hists[h.chip].locExp.fill( localExpectedPosition, localResidual, h.ToT );
+			hists[h.chip].locExp.fill( chipFrameExpectedPosition, chipFrameResidual, h.ToT );
 			quad.locExp.fill( localExpectedPosition, localResidual, h.ToT );
 
 			averageHitPosition=averageHitPosition+h.position;

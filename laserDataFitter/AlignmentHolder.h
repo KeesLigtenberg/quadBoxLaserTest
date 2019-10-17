@@ -196,24 +196,24 @@ struct ChipAlignment : ShiftAndRotateAlignment {
 
 	using ShiftAndRotateAlignment::rotateAndShift;
 	TVector3& rotateAndShift(TVector3& hpos) const {
-		auto dir=(chipNumber==0 || chipNumber==3) ? -1 : 1 ; //because of chip orientation
-		hpos[0]*=dir; hpos[1]*=dir;
-		hpos+=shift;
 		for(int i=0; i<3; i++) {
 			const std::array<TVector3, 3> unitVectors={ TVector3{1,0,0}, TVector3{0,1,0}, TVector3{0,0,1} };
 			hpos=RotateAroundPoint(hpos, rotation[i],COM, unitVectors[i]);
 		}
+		auto dir=(chipNumber==0 || chipNumber==3) ? -1 : 1 ; //because of chip orientation
+		hpos[0]*=dir; hpos[1]*=dir;
+		hpos+=shift;
 		return hpos;
 	}
 	using ShiftAndRotateAlignment::rotateAndShiftBack;
 	TVector3& rotateAndShiftBack(TVector3& hpos) const {
+		hpos-=shift;
+		auto dir=(chipNumber==0 || chipNumber==3) ? -1 : 1 ;//because of chip orientation
+		hpos[0]*=dir; hpos[1]*=dir;
 		for(int i=2; i>=0; i--) {
 			const std::array<TVector3, 3> unitVectors={ TVector3{1,0,0}, TVector3{0,1,0}, TVector3{0,0,1} };
 			hpos=RotateAroundPoint(hpos, -rotation[i],COM, unitVectors[i]);
 		}
-		hpos-=shift;
-		auto dir=(chipNumber==0 || chipNumber==3) ? -1 : 1 ;//because of chip orientation
-		hpos[0]*=-dir; hpos[1]*=dir;
 		return hpos;
 	}
 
